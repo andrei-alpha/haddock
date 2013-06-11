@@ -193,14 +193,14 @@ topDeclElem ((_,_,sourceMap), (_,_,maybe_wiki_url)) loc names html =
             Nothing  -> noHtml
             Just url -> let url' = spliceURL (Just fname) (Just origMod)
                                                (Just n) (Just loc) url
-                          in anchor ! [href url', theclass "link"] << "Source"
+                          in " " +++ anchor ! [href url', theclass "link"] << "Source"
 
         wikiLink =
           case maybe_wiki_url of
             Nothing  -> noHtml
             Just url -> let url' = spliceURL (Just fname) (Just mdl)
                                                (Just n) (Just loc) url
-                          in anchor ! [href url', theclass "link"] << "Comments"
+                          in " " +++ anchor ! [href url', theclass "link"] << "Comments"
 
         -- For source links, we want to point to the original module,
         -- because only that will have the source.
