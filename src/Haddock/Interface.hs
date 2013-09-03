@@ -154,10 +154,16 @@ createIfaces verbosity flags instIfaceMap mods = do
   return (reverse ifaces)
   where
     f (ifaces, ifaceMap) modSummary = do
-      x <- processModule verbosity modSummary flags ifaceMap instIfaceMap
-      return $ case x of
-        Just iface -> (iface:ifaces, Map.insert (ifaceMod iface) iface ifaceMap)
-        Nothing    -> (ifaces, ifaceMap) -- Boot modules don't generate ifaces.
+      em'iface <- gtry $ processModule verbosity modSummary flags ifaceMap instIfaceMap
+      case em'iface of
+        Right (Just iface) -> return (iface:ifaces, Map.insert (ifaceMod iface) iface ifaceMap)
+        Right Nothing      -> return (ifaces, ifaceMap) -- Boot modules don't generate ifaces.
+        Left e             -> do liftIO $ do -- catch IO exceptions; warn only in --keep-going mode
+                                   when (not keepGoing) $ throwIO (e :: IOException)
+                                   noDieMsg $ "Exception when creating interface: " ++ show e
+                                 return (ifaces, ifaceMap)
+
+    keepGoing = Flag_KeepGoing `elem` flags
 
 
 processModule :: Verbosity -> ModSummary -> [Flag] -> IfaceMap -> InstIfaceMap -> Ghc (Maybe Interface)
