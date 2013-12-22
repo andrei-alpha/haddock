@@ -471,7 +471,7 @@ renameExportItem item = case item of
   ExportGroup lev id_ doc -> do
     doc' <- renameDoc doc
     return (ExportGroup lev id_ doc')
-  ExportDecl decl doc subs instances -> do
+  ExportDecl decl args doc subs instances -> do
     decl' <- renameLDecl decl
     doc'  <- renameDocForDecl doc
     subs' <- mapM renameSub subs
@@ -479,7 +479,7 @@ renameExportItem item = case item of
       inst' <- renameInstHead inst
       idoc' <- mapM renameDoc idoc
       return (inst', idoc')
-    return (ExportDecl decl' doc' subs' instances')
+    return (ExportDecl decl' args doc' subs' instances')
   ExportNoDecl x subs -> do
     x'    <- lookupRn x
     subs' <- mapM lookupRn subs

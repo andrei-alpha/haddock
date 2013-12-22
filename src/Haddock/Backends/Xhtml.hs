@@ -508,7 +508,7 @@ ifaceToHtml maybe_source_url maybe_wiki_url iface unicode qual
 
     -- todo: if something has only sub-docs, or fn-args-docs, should
     -- it be measured here and thus prevent omitting the synopsis?
-    has_doc (ExportDecl _ (Documentation mDoc mWarning, _) _ _) = isJust mDoc || isJust mWarning
+    has_doc (ExportDecl _ _ (Documentation mDoc mWarning, _) _ _) = isJust mDoc || isJust mWarning
     has_doc (ExportNoDecl _ _) = False
     has_doc (ExportModule _) = False
     has_doc _ = True
@@ -553,7 +553,7 @@ miniSynopsis mdl iface unicode qual =
 
 processForMiniSynopsis :: Module -> Bool -> Qualification -> ExportItem DocName
                        -> [Html]
-processForMiniSynopsis mdl unicode qual (ExportDecl (L _loc decl0) _doc _ _insts) =
+processForMiniSynopsis mdl unicode qual (ExportDecl (L _loc decl0) _args _doc _ _insts) =
   ((divTopDecl <<).(declElem <<)) `fmap` case decl0 of
     TyClD d -> let b = ppTyClBinderWithVarsMini mdl d in case d of
         (TyFamily{}) -> [ppTyFamHeader True False d unicode qual]
@@ -625,8 +625,8 @@ processExport :: Bool -> LinksInfo -> Bool -> Qualification
               -> ExportItem DocName -> Maybe Html
 processExport summary _ _ qual (ExportGroup lev id0 doc)
   = nothingIf summary $ groupHeading lev id0 << docToHtml qual doc
-processExport summary links unicode qual (ExportDecl decl doc subdocs insts)
-  = processDecl summary $ ppDecl summary links decl doc insts subdocs unicode qual
+processExport summary links unicode qual (ExportDecl decl args doc subdocs insts)
+  = processDecl summary $ ppDecl summary links decl args doc insts subdocs unicode qual
 processExport summary _ _ qual (ExportNoDecl y [])
   = processDeclOneLiner summary $ ppDocName qual y
 processExport summary _ _ qual (ExportNoDecl y subs)

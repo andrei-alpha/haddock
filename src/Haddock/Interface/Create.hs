@@ -43,6 +43,9 @@ import RdrName
 import TcRnTypes
 import FastString (unpackFS, concatFS)
 
+import Debug.Trace
+import Haddock.GhcInstances ()
+
 
 -- | Use a 'TypecheckedModule' to produce an 'Interface'.
 -- To do this, we need access to already processed modules in the topological
@@ -334,6 +337,22 @@ typeDocs d =
     go _ _ = M.empty
 
 
+-- | Count how many arguments a function takes, based on a type signature.
+countArguments :: HsDecl Name -> Int
+countArguments d =
+  let count = go 0 in
+  case d of
+    SigD (TypeSig _ ty) -> count (unLoc ty)
+    ForD (ForeignImport _ ty _ _) -> count (unLoc ty)
+    TyClD (TyDecl { tcdTyDefn = TySynonym {td_synRhs = ty}}) -> count (unLoc ty)
+    _ -> 0
+  where
+    go n (HsForAllTy _ _ _ ty) = go n (unLoc ty)
+    go n (HsFunTy (L _ (HsDocTy _ (L _ _))) (L _ ty)) = go (n+1) ty
+    go n (HsFunTy _ ty) = go (n+1) (unLoc ty)
+    go n _ = n
+
+
 -- | All the sub declarations of a class (that we handle), ordered by
 -- source location, with documentation attached if it exists.
 classDecls :: TyClDecl Name -> [(LHsDecl Name, [HsDocString])]
@@ -482,9 +501,9 @@ mkExportItems
 mkExportItems
   modMap thisMod warnings gre exportedNames decls0
   (maps@(docMap, argMap, subMap, declMap)) optExports _ instIfaceMap dflags =
-  case optExports of
-    Nothing -> fullModuleContents dflags warnings gre maps decls
-    Just exports -> liftM concat $ mapM lookupExport exports
+  trace "mkExportItems" $ case optExports of
+    Nothing -> trace "fmc" $ fullModuleContents dflags warnings gre maps decls
+    Just exports -> trace "exports" $ liftM concat $ mapM lookupExport exports
   where
     decls = filter (not . isInstD . unLoc) decls0
 
@@ -543,7 +562,7 @@ mkExportItems
                    return []
 
               -- normal case
-              | otherwise -> return [ mkExportDecl t newDecl docs_ ]
+              | otherwise -> traceShow (occNameFS $ nameOccName t) $ return [ mkExportDecl t newDecl docs_ ]
                   where
                     -- A single signature might refer to many names, but we
                     -- create an export item for a single name only.  So we
@@ -578,7 +597,8 @@ mkExportItems
     mkExportDecl :: Name -> LHsDecl Name -> (DocForDecl Name, [(Name, DocForDecl Name)]) -> ExportItem Name
     mkExportDecl n decl (doc, subs) = decl'
       where
-        decl' = ExportDecl (restrictTo sub_names (extractDecl n mdl decl)) doc subs' []
+        argNames = getArgumentVars n decl declMap
+        decl' = ExportDecl (restrictTo sub_names (extractDecl n mdl decl)) argNames doc subs' []
         mdl = nameModule n
         subs' = filter (isExported . fst) subs
         sub_names = map fst subs'
@@ -613,7 +633,7 @@ hiValExportItem dflags name doc = do
   mayDecl <- hiDecl dflags name
   case mayDecl of
     Nothing -> return (ExportNoDecl name [])
-    Just decl -> return (ExportDecl decl doc [] [])
+    Just decl -> return (ExportDecl decl [] doc [] [])
 
 
 -- | Lookup docs for a declaration from maps.
@@ -700,12 +720,14 @@ fullModuleContents dflags warnings gre (docMap, argMap, subMap, declMap) decls =
     --
     -- We go through the list of declarations and expand type signatures, so
     -- that every type signature has exactly one name!
-    expandSig :: [LHsDecl name] -> [LHsDecl name]
+    -- expandSig :: [LHsDecl name] -> [LHsDecl name]
     expandSig = foldr f []
       where
-        f :: LHsDecl name -> [LHsDecl name] -> [LHsDecl name]
-        f (L l (SigD (TypeSig    names t))) xs = foldr (\n acc -> L l (SigD (TypeSig    [n] t)) : acc) xs names
-        f (L l (SigD (GenericSig names t))) xs = foldr (\n acc -> L l (SigD (GenericSig [n] t)) : acc) xs names
+        -- f :: LHsDecl name -> [LHsDecl name] -> [LHsDecl name]
+        f (L l (SigD (TypeSig    names t))) xs = traceShow names $ foldr (\n acc -> L l (SigD (TypeSig    [n] t)) : acc) xs names
+        f (L l (SigD (GenericSig names t))) xs = traceShow names $ foldr (\n acc -> L l (SigD (GenericSig [n] t)) : acc) xs names
+        -- f x@(L _ (ValD (FunBind{fun_matches = MatchGroup matches typ}))) xs = trace "here" $ traceShow [ [ pat | L _ pat <- lpats ] | L _ (Match lpats _ _) <- matches ] $ x:xs
+        f x@(L _ (ValD (FunBind{fun_id = L _ name, fun_matches = MatchGroup matches typ}))) xs = traceShow name $ traceShow [ [ i | L _ (VarPat i) <- lpats ] | L _ (Match lpats _ _) <- matches ] $ x:xs
         f x xs = x : xs
 
     mkExportItem :: LHsDecl Name -> ErrMsgGhc (Maybe (ExportItem Name))
@@ -716,16 +738,38 @@ fullModuleContents dflags warnings gre (docMap, argMap, subMap, declMap) decls =
       mbDoc <- liftErrMsg $ processDocStringParas dflags gre docStr
       return $ fmap ExportDoc mbDoc
     mkExportItem (L _ (ValD d))
-      | name:_ <- collectHsBindBinders d, Just [L _ (ValD _)] <- M.lookup name declMap =
+      | name:_ <- collectHsBindBinders d, Just [L _ (ValD vd)] <- {-(\x -> traceShow ("J", x) x) $-} M.lookup name declMap = traceShow ("mkEx ValD", name) $
           -- Top-level binding without type signature.
-          let (doc, _) = lookupDocs name warnings docMap argMap subMap in
-          fmap Just (hiValExportItem dflags name doc)
+          let (doc, _) = lookupDocs name warnings docMap argMap subMap
+           in fmap Just (hiValExportItem dflags name doc)
       | otherwise = return Nothing
     mkExportItem decl
-      | name:_ <- getMainDeclBinder (unLoc decl) =
-        let (doc, subs) = lookupDocs name warnings docMap argMap subMap in
-        return $ Just (ExportDecl decl doc subs [])
-      | otherwise = return Nothing
+      | name:_ <- getMainDeclBinder (unLoc decl) = traceShow ("normal", name) $
+        let (doc, subs) = lookupDocs name warnings docMap argMap subMap
+            argumentVars = getArgumentVars name decl declMap
+         in
+        traceShow ("vars", argumentVars, countArguments (unLoc decl)) $ return $ Just (ExportDecl decl argumentVars doc subs [])
+      | otherwise = traceShow "vars otherwise" $ return Nothing
+
+
+getArgumentVars :: Name -> LHsDecl Name -> DeclMap -> [String]
+getArgumentVars name decl declMap = argumentVars
+  where
+    numTypeArgs = countArguments (unLoc decl)
+    argumentVars = case M.lookup name declMap of
+      Nothing      -> []
+      Just hsDecls -> if length firstFunDefVars == numTypeArgs
+                        then firstFunDefVars
+                        else []
+        where
+          vars = -- all variables in all match patterns of all function decls with this name
+              [ [ [ show var -- use String instead of Name here: It's just a description
+              | L _ (VarPat var) <- lpats ]
+              | L _ (Match lpats _ _) <- matches ]
+              | L _ (ValD (FunBind{ fun_matches = MatchGroup matches _typ })) <- hsDecls ]
+          firstFunDefVars = case vars of
+            (vs:_):_ -> vs
+            _        -> trace ("Warning: mkExportItem: No function definition found for " ++ show name) []
 
 
 -- | Sometimes the declaration we want to export is not the "main" declaration:

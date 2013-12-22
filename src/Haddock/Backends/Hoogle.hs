@@ -110,7 +110,7 @@ operator x = x
 -- How to print each export
 
 ppExport :: DynFlags -> ExportItem Name -> [String]
-ppExport dflags (ExportDecl decl dc subdocs _) = ppDocumentation dflags (fst dc) ++ f (unL decl)
+ppExport dflags (ExportDecl decl _args dc subdocs _) = ppDocumentation dflags (fst dc) ++ f (unL decl)
     where
         f (TyClD d@TyDecl{})
             | isDataDecl d      = ppData dflags d subdocs

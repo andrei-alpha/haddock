@@ -35,26 +35,26 @@ import GHC
 import Name
 
 
-ppDecl :: Bool -> LinksInfo -> LHsDecl DocName ->
+ppDecl :: Bool -> LinksInfo -> LHsDecl DocName -> [String] ->
           DocForDecl DocName -> [DocInstance DocName] -> [(DocName, DocForDecl DocName)] ->
           Bool -> Qualification -> Html
-ppDecl summ links (L loc decl) (mbDoc, fnArgsDoc) instances subdocs unicode qual = case decl of
+ppDecl summ links (L loc decl) argNames (mbDoc, fnArgsDoc) instances subdocs unicode qual = case decl of
   TyClD d@(TyFamily {})          -> ppTyFam summ False links loc mbDoc d unicode qual
   TyClD d@(TyDecl{ tcdTyDefn = defn })   
       | isHsDataDefn defn        -> ppDataDecl summ links instances subdocs loc mbDoc d unicode qual
       | otherwise                -> ppTySyn summ links loc (mbDoc, fnArgsDoc) d unicode qual
   TyClD d@(ClassDecl {})         -> ppClassDecl summ links instances loc mbDoc subdocs d unicode qual
-  SigD (TypeSig lnames (L _ t))  -> ppFunSig summ links loc (mbDoc, fnArgsDoc) (map unLoc lnames) t unicode qual
-  ForD d                         -> ppFor summ links loc (mbDoc, fnArgsDoc) d unicode qual
+  SigD (TypeSig lnames (L _ t))  -> ppFunSig summ links loc (mbDoc, fnArgsDoc) (map unLoc lnames) argNames t unicode qual
+  ForD d                         -> ppFor summ links loc (mbDoc, fnArgsDoc) argNames d unicode qual
   InstD _                        -> noHtml
   _                              -> error "declaration not supported by ppDecl"
 
 
 ppFunSig :: Bool -> LinksInfo -> SrcSpan -> DocForDecl DocName ->
-            [DocName] -> HsType DocName -> Bool -> Qualification -> Html
-ppFunSig summary links loc doc docnames typ unicode qual =
+            [DocName] -> [String] -> HsType DocName -> Bool -> Qualification -> Html
+ppFunSig summary links loc doc docnames argNames typ unicode qual =
   ppTypeOrFunSig summary links loc docnames typ doc
-    ( ppTypeSig summary occnames typ unicode qual
+    ( ppTypeSig summary occnames argNames typ unicode qual
     , concatHtml . punctuate comma $ map (ppBinder False) occnames
     , dcolon unicode
     )
@@ -106,10 +106,10 @@ tyvarNames = map getName . hsLTyVarNames
 
 
 ppFor :: Bool -> LinksInfo -> SrcSpan -> DocForDecl DocName
-      -> ForeignDecl DocName -> Bool -> Qualification -> Html
-ppFor summary links loc doc (ForeignImport (L _ name) (L _ typ) _ _) unicode qual
-  = ppFunSig summary links loc doc [name] typ unicode qual
-ppFor _ _ _ _ _ _ _ = error "ppFor"
+      -> [String] -> ForeignDecl DocName -> Bool -> Qualification -> Html
+ppFor summary links loc doc argNames (ForeignImport (L _ name) (L _ typ) _ _) unicode qual
+  = ppFunSig summary links loc doc [name] argNames typ unicode qual
+ppFor _ _ _ _ _ _ _ _ = error "ppFor"
 
 
 -- we skip type patterns for now
@@ -127,9 +127,9 @@ ppTySyn summary links loc doc (TyDecl { tcdLName = L _ name, tcdTyVars = ltyvars
 ppTySyn _ _ _ _ _ _ _ = error "declaration not supported by ppTySyn"
 
 
-ppTypeSig :: Bool -> [OccName] -> HsType DocName  -> Bool -> Qualification -> Html
-ppTypeSig summary nms ty unicode qual =
-  concatHtml htmlNames <+> dcolon unicode <+> ppType unicode qual ty
+ppTypeSig :: Bool -> [OccName] -> [String] -> HsType DocName -> Bool -> Qualification -> Html
+ppTypeSig summary nms argNames ty unicode qual =
+  concatHtml htmlNames <+> stringToHtml (unwords argNames) <+> dcolon unicode <+> ppType unicode qual ty
   where
     htmlNames = intersperse (stringToHtml ", ") $ map (ppBinder summary) nms
 
@@ -307,10 +307,11 @@ ppShortClassDecl summary links (ClassDecl { tcdCtxt = lctxt, tcdLName = lname, t
 
                 -- ToDo: add associated type defaults
 
-            [ ppFunSig summary links loc doc names typ unicode qual
+            [ ppFunSig summary links loc doc names [] typ unicode qual
               | L _ (TypeSig lnames (L _ typ)) <- sigs
               , let doc = lookupAnySubdoc (head names) subdocs
                     names = map unLoc lnames ]
+              -- TODO nh2: Can we get the argument names here instead of []?
               -- FIXME: is taking just the first name ok? Is it possible that
               -- there are different subdocs for different names in a single
               -- type signature?
@@ -345,7 +346,8 @@ ppClassDecl summary links instances loc d subdocs
                       | at <- ats
                       , let doc = lookupAnySubdoc (tcdName $ unL at) subdocs ]
 
-    methodBit = subMethods [ ppFunSig summary links loc doc names typ unicode qual
+    methodBit = subMethods [ ppFunSig summary links loc doc names [] typ unicode qual
+                           -- TODO nh2: Can we get the argument names here instead of []?
                            | L _ (TypeSig lnames (L _ typ)) <- lsigs
                            , let doc = lookupAnySubdoc (head names) subdocs
                                  names = map unLoc lnames ]

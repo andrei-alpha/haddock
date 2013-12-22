@@ -149,6 +149,7 @@ library
 
   other-modules:
     Haddock
+    Haddock.GhcInstances
     Haddock.Interface
     Haddock.Interface.Rename
     Haddock.Interface.Create
